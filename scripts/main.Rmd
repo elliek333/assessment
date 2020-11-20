@@ -3,9 +3,9 @@ title: "main"
 author: "Ellie Kewin"
 date: "20/11/2020"
 output:
+  bookdown::pdf_document2: default
   bookdown::html_document2: default
   bookdown::word_document2: default
-  bookdown::pdf_document2: default
 bibliography: reference.bib
 ---
 
