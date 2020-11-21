@@ -1,5 +1,5 @@
 ---
-title: "main"
+title: "Predicting Clinical Dementia Rating...."
 author: "Ellie Kewin"
 date: "20/11/2020"
 output:
@@ -19,13 +19,33 @@ knitr::opts_chunk$set(echo = FALSE,
 ```{r packages}
 library(tidyverse)
 library(bookdown)
+library(readxl)
+library(janitor)
+```
+
+```{r functions}
+#reads in all sheets from an xlsx file
+read_xlsx_allsheets <- function(filename, tibble = FALSE) {
+    sheets <- readxl::excel_sheets(filename)
+    x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
+    if(!tibble) x <- lapply(x, as.data.frame)
+    names(x) <- sheets
+    x
+}
+
 ```
 
 #Introduction
 
 #Methods
 ```{R Import}
+#reading in both xlsx sheets, storing them as a list of data frames
+dementia_raw <- read_xlsx_allsheets("data_raw/dementia.xlsx")
 
+#merging data frames (subject_id) and cleaning column names
+dementia <- merge.data.frame(dementia_raw$`visit data`, dementia_raw$`patient data`, 
+  by = "Subject ID") %>% 
+  janitor::clean_names()
 ```
 
 ```{R Tidying}
