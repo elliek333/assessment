@@ -3,8 +3,8 @@ title: "main"
 author: "Ellie Kewin"
 date: "20/11/2020"
 output:
-  bookdown::html_document2: default
   bookdown::word_document2: default
+  bookdown::html_document2: default
   bookdown::pdf_document2: default
 bibliography: reference.bib
 ---
@@ -19,7 +19,6 @@ knitr::opts_chunk$set(echo = FALSE,
 ```{r packages}
 library(tidyverse)
 library(bookdown)
-library(tinytex)
 ```
 
 #Introduction
