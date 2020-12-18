@@ -1,10 +1,10 @@
 ---
-title: "Predicting Clinical Dementia Rating...."
+title: "Estimating Clinical Dementia Rating from Determinants"
 author: "Ellie Kewin"
 date: "20/11/2020"
 output:
-  bookdown::word_document2: default
   bookdown::html_document2: default
+  bookdown::word_document2: default
   bookdown::pdf_document2: default
 bibliography: reference.bib
 ---
@@ -19,12 +19,13 @@ knitr::opts_chunk$set(echo = FALSE,
 ```{r packages}
 library(tidyverse)
 library(bookdown)
-library(readxl)
-library(janitor)
+library(caret)
+library(kableExtra)
+# FOR REFERENCING: other packages used: janitor, readxl, MASS
 ```
 
 ```{r functions}
-#reads in all sheets from an xlsx file
+# reads in all sheets from an xlsx file
 read_xlsx_allsheets <- function(filename, tibble = FALSE) {
     sheets <- readxl::excel_sheets(filename)
     x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
@@ -33,29 +34,147 @@ read_xlsx_allsheets <- function(filename, tibble = FALSE) {
     x
 }
 
+#function that summaries, the mean, n, standard deviation and standard error of the data
+data_summary <- function(df, measure, group)  {
+  df %>% 
+   group_by({{ group }}) %>% 
+   summarise(mean_index = mean({{ measure }}),
+            n = length({{ measure }}),  sd = sd({{ measure }}), se = sd/sqrt(n))
+}
+#Please note the data summary function is not compatible with the plyr package
+
+# Function that adds column to a data table unless the column already exists
+fncols <- function(data, cname) {
+  add <-cname[!cname%in%names(data)]
+
+  if(length(add)!=0) data[add] <- NA
+  data
+}
+
+paste_no_na <- function(...,sep=", ") {
+    L <- list(...)
+    L <- lapply(L,function(x) {x[is.na(x)] <- ""; x})
+    gsub(paste0("(^",sep,"|",sep,"$)"),"",
+                gsub(paste0(sep,sep),sep,
+                     do.call(paste,c(L,list(sep=sep)))))
+}
 ```
 
-#Introduction
+# Introduction
 
-#Methods
-```{R Import}
-#reading in both xlsx sheets, storing them as a list of data frames
+```{r defintions-summary-table}
+# a table which summarizes the key terms from the dementia data set
+defintions_table <- data.frame(
+  Term = c("CDR", "eTIV", "nWBV", "ASF", "EDUC", "SES"),
+  Definition = c(
+    "Clinical Dementia rating (0 = no impairment, 0.5 = questionable, 1 = mild, 2 = moderate, 3= severe).  A clinical tool that measures relative dementia symptoms based on 6 domains (memory, orientation, judgment and problem solving, community affairs, home and hobbies, and personal care)",
+    "Estimated total intracranical volume (mm3)", 
+    "Normalized whole-brain volume",
+    "Atlas Scaling Factor (unitless)",
+    "Years of Education",
+    "Socioeconomic status, assesed by Hollingshead Four Factor Index Of Social Status, measures the social status of an indvidual based on 4 domains: marital status, retired/employed status, educational attainment, and occupational prestige"
+  )
+)
+
+kbl(defintions_table, caption = "Key Terms Table") %>%
+  kable_styling(full_width = F, position = "float_right") %>%
+  column_spec(1, bold = T, border_right = T) %>%
+  column_spec(2, width = "30em", background = "#E69F00", color = "white") %>% 
+  kable_styling(full_width = F, position = "right")
+```
+
+Determining individuals most susceptible to a disease allows productive resource allocation. For diseases such as Dementia, individuals both inherit risk factors and accrue them throughout life. No factor is causative on its own, but understanding what contributes to a high risk allows the public health sector to assess and prevent potential health crises. Dementia is a clinical syndrome characterized by difficulties in memory and language, psychological and psychiatric changes, and impairments in activities of daily life [@Burns2009-sn]. 
+
+# Methods
+
+
+```{r import}
+# reading in both xlsx sheets, storing them as a list of data frames
 dementia_raw <- read_xlsx_allsheets("data_raw/dementia.xlsx")
+```
 
-#merging data frames (subject_id) and cleaning column names
-dementia <- merge.data.frame(dementia_raw$`visit data`, dementia_raw$`patient data`, 
+```{r tidying}
+# merging data frames (by subject_id) and cleaning column names
+dementia_clean <- merge.data.frame(dementia_raw$`visit data`, dementia_raw$`patient data`, 
   by = "Subject ID") %>% 
   janitor::clean_names()
+
+# removing columns not used for analysis, rows with missing values and duplicate rows
+dementia <- subset(dementia_clean, select =- c(mmse, group, mri_number, visit)) %>% 
+  distinct(subject_id, .keep_all = TRUE) %>% 
+  drop_na()
 ```
 
-```{R Tidying}
+# Results
 
+```{r summary-statistics-table}
+# creating determinant value to add as a column
+determinant <- "determinant"
+
+# list of column names for summary table column headers
+summarycolumnnames <- c("Determinant", "CDR", "Mean", "N", "Standard Deviation", "Standard Error")
+
+# create a summary table, add a determinant column, unless that already exists 
+# (fncols function) and add in the determinant name to the column, removing NA as
+# well (paste2 function).
+
+# Age Summary Table
+age_summary <- data_summary(dementia, age, cdr) %>% 
+  fncols(determinant) 
+age_summary$determinant <- paste_no_na("Age", age_summary$determinant)
+
+# eTIV Summary Table
+e_tiv_summary <- data_summary(dementia, e_tiv, cdr) %>% 
+  fncols(determinant) 
+e_tiv_summary$determinant <- paste_no_na("eTIV", e_tiv_summary$determinant)
+
+# nWBV Summary Table
+n_wbv_summary <- data_summary(dementia, n_wbv, cdr) %>% 
+  fncols(determinant)
+n_wbv_summary$determinant <- paste_no_na("nWBV", n_wbv_summary$determinant)
+
+# ASF Summary Table
+asf_summary <- data_summary(dementia, asf, cdr) %>% 
+  fncols(determinant)
+asf_summary$determinant <- paste_no_na("ASF", asf_summary$determinant)
+
+# EDUC Summary Table
+educ_summary <- data_summary(dementia, educ, cdr) %>% 
+  fncols(determinant)
+educ_summary$determinant <- paste_no_na("EDUC", educ_summary$determinant)
+
+# SES Summary Table
+ses_summary <- data_summary(dementia, ses, cdr) %>% 
+  fncols(determinant)
+ses_summary$determinant <- paste_no_na("SES", ses_summary$determinant)
+
+# Combining all summary tables into one
+summary_table <- rbind(age_summary, e_tiv_summary, n_wbv_summary, asf_summary,
+                       educ_summary, ses_summary)
+
+#reorder by column index so determinant is first
+summary_table <- summary_table[c(6,1,2,3,4,5)]
+
+# generating summary table, row colours are colour blind friendly and are meant to
+# help differ different determinants
+kbl(summary_table, caption = "Summary Statitics Table", col.names = summarycolumnnames) %>%
+  kable_styling(bootstrap_options = "condensed", full_width = F, position = "float_right") %>% 
+  row_spec(c(1,2,3), color = "white",
+           background = "#E69F00") %>% 
+  row_spec(c(4,5,6), color = "white",
+           background = "#56B4E9") %>% 
+  row_spec(c(7,8,9), color = "white",
+           background = "#009E73") %>% 
+  row_spec(c(10,11,12), color = "white",
+           background = "#CC79A7")  %>% 
+  row_spec(c(13,14,15), color = "white",
+           background = "#0072B2")  %>% 
+  row_spec(c(16,17,18), color = "white",
+           background = "#D55E00") 
+
+# Summary Table for Sex (m_f) (frequency data)
 ```
 
-```{R Summarise}
-
-```
-#Results
 ```{r extract}
 
 ```
@@ -68,10 +187,56 @@ dementia <- merge.data.frame(dementia_raw$`visit data`, dementia_raw$`patient da
 
 ```
 
-```{r summary-table}
+
+# Clinical Dementia Rating Prediction Model
+
+```{r dementia-tidying-prediction}
+# removal of subject_id data (gives no information about patient)
+dementia_prediction <- subset(dementia, select =- subject_id) 
+
+# converting categorical data (M or F) to numerical data (M = 2, F = 1) for use in model
+dementia_prediction[dementia_prediction == "F"] <- 1 
+dementia_prediction[dementia_prediction == "M"] <- 2
+
+dementia_prediction$m_f <- as.numeric(dementia_prediction$m_f)
+```
+
+```{r dementia-partition}
+# randomly select rows for the training data set
+ids <- createDataPartition(y = dementia_prediction$cdr,
+                           p = 0.75,
+                           list = FALSE)
+# subset training (75% of data) and testing (25% of data) sets based on row selection
+train <- dementia_prediction %>% slice(ids)
+test <- dementia_prediction %>% slice(-ids)
+```
+
+```{r dementia-lda-train}
+lda <- train %>% 
+  select(-cdr) %>%
+  MASS::lda(grouping = train$cdr)
+```
+
+```{r dementia-lda-predict-on-test}
+plda <- test %>% 
+  select(-cdr) %>%
+  predict(object = lda)
+```
+
+```{r dementia-lda-confusion}
+confusionMatrix(plda$class, factor(test$cdr))
+```
+
+```{r model-accuracy}
 
 ```
 
-#Discussion
+# Clinical Dementia Rating Questionairre
 
-#References
+```{r shiny}
+
+```
+
+# Discussion
+
+# References
