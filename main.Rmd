@@ -1,11 +1,12 @@
 ---
-title: "Estimating Clinical Dementia Rating from Determinants"
+title: "Using Determinants to Predict Clinical Dementia Rating "
 author: "Ellie Kewin"
-date: "20/11/2020"
-output:
-  bookdown::html_document2: default
-  bookdown::word_document2: default
-  bookdown::pdf_document2: default
+date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  bookdown::html_document2:
+    toc: true
+    number_sections: true
+    css: "style.css"
 bibliography: reference.bib
 ---
 
@@ -13,230 +14,573 @@ bibliography: reference.bib
 knitr::opts_chunk$set(echo = FALSE, 
                       warning = FALSE,
                       message = FALSE,
-                      fig.retina = 3)
+                      fig.retina = 10)
 ```
 
 ```{r packages}
+library(devtools)
 library(tidyverse)
 library(bookdown)
 library(caret)
 library(kableExtra)
-# FOR REFERENCING: other packages used: janitor, readxl, MASS
+library(readxl)
+library(ggpubr)
+library(shiny)
+library(shinyforms)
+```
+
+```{r addins}
+devtools::install_github("benmarwick/wordcountaddin",  type = "source", dependencies = TRUE)
 ```
 
 ```{r functions}
-# reads in all sheets from an xlsx file
-read_xlsx_allsheets <- function(filename, tibble = FALSE) {
-    sheets <- readxl::excel_sheets(filename)
-    x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
-    if(!tibble) x <- lapply(x, as.data.frame)
-    names(x) <- sheets
-    x
-}
+# Function that summaries, the mean, n, standard deviation and standard error of the data
+source("functions/data_summary.R")
 
-#function that summaries, the mean, n, standard deviation and standard error of the data
-data_summary <- function(df, measure, group)  {
-  df %>% 
-   group_by({{ group }}) %>% 
-   summarise(mean_index = mean({{ measure }}),
-            n = length({{ measure }}),  sd = sd({{ measure }}), se = sd/sqrt(n))
-}
-#Please note the data summary function is not compatible with the plyr package
+# Function that adds a column to a data table unless that column already exists
+source("functions/fnconcol.R")
 
-# Function that adds column to a data table unless the column already exists
-fncols <- function(data, cname) {
-  add <-cname[!cname%in%names(data)]
+# Function that tests whether a p value is less than a given significance level or not
+source("functions/p_value_significance.R")
 
-  if(length(add)!=0) data[add] <- NA
-  data
-}
+# Custom geom_theme function: theme_itm (main feature is inward tick marks)
+source("functions/theme_itm.R")
+```
 
-paste_no_na <- function(...,sep=", ") {
-    L <- list(...)
-    L <- lapply(L,function(x) {x[is.na(x)] <- ""; x})
-    gsub(paste0("(^",sep,"|",sep,"$)"),"",
-                gsub(paste0(sep,sep),sep,
-                     do.call(paste,c(L,list(sep=sep)))))
-}
+```{r palette}
+# colour blind friendly palette
+palette <- c("#E69F00", "#56B4E9", "#009E73", 
+                       "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999")
+
 ```
 
 # Introduction
+Determining individuals most susceptible to a disease allows productive resource allocation. For diseases such as Dementia, individuals both inherit risk factors and accrue them throughout life. No factor is causative on its own, but understanding what contributes to a high risk allows the public health sector to assess and prevent potential health crises. Dementia is a clinical syndrome characterized by difficulties in memory and language, psychological and psychiatric changes, and impairments in activities of daily life [@Burns2009-sn]. Dementia's complex list of possible symptoms are reflected in its causes. Common origins of dementia can be degenerative neurological diseases such as Parkinson's or Alzheimer's; however vascular disorders in the brain, traumatic head injuries and some infections can lead to a dementia diagnosis.  
 
-```{r defintions-summary-table}
+The data used in analysis is attained from a longitudinal study of 150 participants. Participants were right-handed, either male of female and aged between 60 and 96. They were characterized as either nondemented, demented or converted (became demented throughout the course of the study). For each session, participants took part in T1 weighted MRI scans, the results of which are recorded in the data set. Participants underwent 2 or more sessions, each separated by at least a year. 
+
+This workflow aims to look at two questions. What factors are associated with an increased risk of dementia and what factors are associated with an increased risk over time. It is important to note, no determinant causes dementia. The profiles of two people characterized as suffering with dementia maybe completely different. 
+ 
+# Methods
+Workflow is produced with R, a statistical computing language, [@r-core-team] and R Markdown which generates this html report.[@rmarkdown]. The **`bookdown`** package is used to add features to R Markdown such as cross referencing [@bookdown].
+
+Data is imported using R, the **`tidyverse`** [@tidyverse] and **`readxl`** [@readxl] packages.
+
+```{r import}
+# reading in both xlsx sheets from the dementia.xlsx file
+visit_data <- read_excel("data_raw/dementia.xlsx", sheet = 1)
+patient_data <-read_excel("data_raw/dementia.xlsx", sheet = 2)
+```
+
+## Data Description
+Raw data is two excel sheets within the same spreadsheet [dementia.xlsx](./data_raw/dementia.xlsx). One sheet is visit data, containing information regarding amount of visits and MRIs as well as numerical results. The second sheet, patient data, contains information on current dementia status, sex, and education and social status. Each row is one patient's data at one given time. Replicate subject_IDs can be seen as some patients had data collected once a year over a course of multiple years. Explanations of each column can be seen in \@ref(tab:definitions-table).
+
+```{r definitions-table}
 # a table which summarizes the key terms from the dementia data set
-defintions_table <- data.frame(
-  Term = c("CDR", "eTIV", "nWBV", "ASF", "EDUC", "SES"),
+definitions_table <- data.frame(
+  Term = c("MMSE","CDR", "eTIV", "nWBV", "ASF", "M_F", "EDUC", "SES"),
   Definition = c(
-    "Clinical Dementia rating (0 = no impairment, 0.5 = questionable, 1 = mild, 2 = moderate, 3= severe).  A clinical tool that measures relative dementia symptoms based on 6 domains (memory, orientation, judgment and problem solving, community affairs, home and hobbies, and personal care)",
-    "Estimated total intracranical volume (mm3)", 
-    "Normalized whole-brain volume",
+    "Mini-Mental State Examination score (range: 0 = worst to 30 = best). A 30-point questionaire used to measure cognitive impairement. A score above 24 is considered normal. Lower scores may correlate with dementia although this is not true in every case.", 
+    "Clinical Dementia rating (0 = no impairment, 0.5 = questionable, 1 = mild, 2 = moderate, 3 = severe).  A clinical tool that measures relative dementia symptoms based on 6 domains (memory, orientation, judgment and problem solving, community affairs, home and hobbies, and personal care)",
+    "Estimated total intracranial volume (mm3)", 
+    "Normalized whole-brain volume (%)",
     "Atlas Scaling Factor (unitless)",
+    "Patient sex, Female is represented by a 1, Male is represented by a 2",
     "Years of Education",
-    "Socioeconomic status, assesed by Hollingshead Four Factor Index Of Social Status, measures the social status of an indvidual based on 4 domains: marital status, retired/employed status, educational attainment, and occupational prestige"
+    "Socioeconomic status, assessed by Hollingshead Four Factor Index Of Social Status, measures the social status of an individual based on 4 domains: marital status, retired/employed status, educational attainment, and occupational prestige. A score of 1 indicates high status, while 5 indicates lowest status"
   )
 )
 
-kbl(defintions_table, caption = "Key Terms Table") %>%
-  kable_styling(full_width = F, position = "float_right") %>%
+kbl(definitions_table, caption = "Key Terms Table") %>%
   column_spec(1, bold = T, border_right = T) %>%
-  column_spec(2, width = "30em", background = "#E69F00", color = "white") %>% 
-  kable_styling(full_width = F, position = "right")
+  column_spec(2, width = "100em", background = "#999999", color = "black") %>% 
+  kable_styling(full_width = T, font_size = 10)
 ```
 
-Determining individuals most susceptible to a disease allows productive resource allocation. For diseases such as Dementia, individuals both inherit risk factors and accrue them throughout life. No factor is causative on its own, but understanding what contributes to a high risk allows the public health sector to assess and prevent potential health crises. Dementia is a clinical syndrome characterized by difficulties in memory and language, psychological and psychiatric changes, and impairments in activities of daily life [@Burns2009-sn]. 
+## Data Transformation
+3 data sets were created with the raw data. Each one starts by merging visit_data and patient_data into one set by subject ID. Post import and merging, data variable names are cleaned with the **`janitor`** [@janitor] package. From here they differ as described below:
 
-# Methods
+1. Dementia: used to look at which factors are associated with an increased risk of dementia. Columns not used in analysis (subject_id, visit, group and mri_number) and rows with NA values are removed. Finally, the values in m_f have been converted to numerical values for analysis (F = 1, M = 2).
 
-
-```{r import}
-# reading in both xlsx sheets, storing them as a list of data frames
-dementia_raw <- read_xlsx_allsheets("data_raw/dementia.xlsx")
-```
-
-```{r tidying}
+```{r transformation-datatset1}
 # merging data frames (by subject_id) and cleaning column names
-dementia_clean <- merge.data.frame(dementia_raw$`visit data`, dementia_raw$`patient data`, 
+dementia <- merge.data.frame(visit_data, patient_data,
   by = "Subject ID") %>% 
   janitor::clean_names()
 
-# removing columns not used for analysis, rows with missing values and duplicate rows
-dementia <- subset(dementia_clean, select =- c(mmse, group, mri_number, visit)) %>% 
-  distinct(subject_id, .keep_all = TRUE) %>% 
+# removing columns not used for analysis and rows with missing values
+dementia <- subset(dementia, select =- c(group, mri_number, visit, subject_id)) %>% 
   drop_na()
+
+# converting categorical data (F or M) to numerical data (F = 1, M = 2) for use in analysis
+dementia[dementia == "F"] <- 1 
+dementia[dementia == "M"] <- 2
+dementia$m_f <- as.numeric(dementia$m_f)
+```
+2. Dementia2: used to look at factors contributing to dementia over time. The aim of this data set was use in either a paired Student's t-test or paired samples Wilcoxon test. In this data set, the cdr and mri_number columns and NA rows were removed. The rows are rearranged into visit number ascending order. The values in m_f have been converted to numerical values for analysis (F = 1, M = 2). The Nondemented and Demented rows from the group column are removed as these did not change over time. Only visits 1 and 2 are kept, for most subjects there was no data for visit number 3 or higher. OAS2_ are removed from the subject_id strings. Unique subject_ids were removed as they do not have pairs. Finally, the visit levels were ordered, purely to have start and end in order in the boxplots. 
+
+```{r transformation-dataset2}
+# creation of a data set that looks at dementia overtime
+# analysis will look for converted participants and what factors have increased
+
+# merging data frames (by subject_id) and cleaning column names
+dementia2 <- merge.data.frame(visit_data, patient_data,
+  by = "Subject ID") %>% 
+  janitor::clean_names()
+
+# removing columns not used for analysis and rows with missing values
+# rearranging data by visit number (ascending order)
+dementia2 <- subset(dementia2, select =- c(cdr, mri_number)) %>% 
+  drop_na() %>% 
+  arrange(visit)
+
+# Removing non-demented and demented rows as these did not change over time
+dementia2 <- subset(dementia2, group == "Converted")
+
+# converting categorical data (F or M) to numerical data (F = 1, M = 2) for use in analysis
+dementia2[dementia2 == "F"] <- 1 
+dementia2[dementia2 == "M"] <- 2
+dementia2$m_f <- as.numeric(dementia2$m_f)
+
+# remove all visits 3 or higher
+dementia2 <- subset(dementia2, visit <= 2)
+
+# Creating before and after categories in visit data. For use in statistical testing
+dementia2 <- dementia2 %>% mutate(visit = replace(visit, visit == 1, "Start"))
+dementia2 <- dementia2 %>% mutate(visit = replace(visit, visit == 2, "End"))
+
+# Doing a paired t test yielded this message: not all arguments have the same length. Doing an unpaired t test did fix this but ideally a paired t test would have been done. The data is paired just some data is maybe missing from the original data set/some participants just did more visits. So here two random subsets with the same lengths (14) are made and bound together. One subset is from the before group and the other is from the after group. 
+
+# Remove OAS2_ from subject_id strings so they are just numeric
+dementia2$subject_id <- gsub("OAS2_", "", dementia2$subject_id)
+
+# Remove unique subject_ids as these did not have a pair in the data
+dementia2 <- subset(dementia2,duplicated(subject_id) | duplicated(subject_id, fromLast=TRUE))
+
+# Changing the order in which before/after are displayed in the plot (before first)
+dementia2$visit <- factor(dementia2$visit,
+    levels = c("Start", "End"),ordered = TRUE)
+```
+3. Dementia_extract: used to generate some of the values used for inline reporting. In this data set all repeated subject_ids were removed so that accurate numbers about the number of participants could be recorded. 
+
+```{r transformation-extract-dataset}
+# data set used for some of the inline value extracting
+dementia_extract <- merge.data.frame(visit_data, patient_data,
+  by = "Subject ID") %>% 
+  janitor::clean_names()  %>% 
+  distinct(subject_id, .keep_all = TRUE)
 ```
 
-# Results
+```{r extract}
+# number of female participants
+nfemale <- sum(dementia_extract$m_f == "F") %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric() 
 
-```{r summary-statistics-table}
+# number of male participants
+nmale <- sum(dementia_extract$m_f == "M")  %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+
+# number of particpants with a cdr of 2.0
+n2cdr <- sum(dementia$cdr == 2.0)  %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+
+# number of particpants with a cdr of less than 2.0
+n01cdr <- sum(dementia$cdr != 2.0)  %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+
+# number of converted particpiants
+nconverted <- sum(dementia2$group == "Converted")  %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+```
+# Which determinants correlate with increased CDR? {.tabset}
+Using the dementia data set, this section looks at which determinants correlate with a high clinical dementia rating (CDR). In other words which determinants are linked with dementia. A list and explanation of the determinants used in this analysis can be seen in \@ref(tab:definitions-table).
+
+```{r dementia-exploration, include=FALSE}
+# First ten rows of dementia
+head(dementia, n = 10)
+# Dimensions of dementia
+dim(dementia)
+# Class of dementia
+class(dementia)
+# Structure of dementia
+str(dementia)
+```
+
+```{r dementia-distrubution, include=FALSE}
+# is the data normally distributed?
+apply(dementia, 2, shapiro.test) 
+# all p values less than 0.05 so null hypothesis that data is normally distributed is rejected. Data is not normally distributed
+```
+
+```{r dementia-testing-spearmans, include=FALSE}
+age_spearman <-cor.test(dementia$age, dementia$cdr,  method = "spearman")
+mmse_spearman <-cor.test(dementia$mmse, dementia$cdr,  method = "spearman")
+e_tiv_spearman <-cor.test(dementia$e_tiv, dementia$cdr,  method = "spearman")
+n_wbv_spearman <-cor.test(dementia$n_wbv, dementia$cdr,  method = "spearman")
+asf_spearman <-cor.test(dementia$asf, dementia$cdr,  method = "spearman")
+m_f_spearman <-cor.test(dementia$m_f, dementia$cdr,  method = "spearman")
+educ_spearman <-cor.test(dementia$educ, dementia$cdr,  method = "spearman")
+ses_spearman <-cor.test(dementia$ses, dementia$cdr,  method = "spearman")
+age_spearman
+mmse_spearman
+e_tiv_spearman
+n_wbv_spearman
+asf_spearman
+m_f_spearman
+educ_spearman
+ses_spearman
+```
+
+## Scatter Plots
+Plots are generated using **`ggplot2`** from the **`tidyverse`** package [@tidyverse]. Arrangement of plots into a grid was achieved using ggarrange from the **`ggpubr`** package [@ggpubr].
+```{r dementia-plot, fig.height = 12, fig.width = 14, out.width="1200px", out.height="750px", fig.cap="\\label{fig:figs}Scatter Plots That Demonstrate Correlations Between Determinant And A High CDR"}
+age_scatter <- ggplot(dementia, aes(x=cdr, y=age)) + 
+  geom_point() +
+  theme_itm() +
+  geom_smooth(method=lm,  linetype="dashed",
+             color="#E69F00", fill="#56B4E9") +
+  ylab("Age (years)") + 
+    theme(axis.title.y = element_text(angle = 90)) +
+  stat_cor(method="spearman", cor.coef.name = "rho", label.x = 1.5,
+                  label.y = 1,  size = 3)
+
+mmse_scatter <- ggplot(dementia, aes(x=cdr, y=mmse)) + 
+  geom_point() +
+  theme_itm() +
+  geom_smooth(method=lm,  linetype="dashed",
+             color="#009E73", fill="#F0E442") +
+  ylab("Mini-Mental State Examination score (MMSE)") + 
+    theme(axis.title.y = element_text(angle = 90)) +
+  stat_cor(method="spearman", cor.coef.name = "rho", label.x = 1.5,
+                  label.y = 1,  size = 3)
+
+e_tiv_scatter <- ggplot(dementia, aes(x=cdr, y=e_tiv)) + 
+  geom_point() +
+  theme_itm() +
+  geom_smooth(method=lm,  linetype="dashed",
+             color="#0072B2", fill="#D55E00") +
+  ylab("Estimated total intracranical volume (eTIV) [mm3]") + 
+    theme(axis.title.y = element_text(angle = 90)) + 
+  stat_cor(method="spearman", cor.coef.name = "rho", label.x = 1.5,
+                  label.y = 1,  size = 3)
+
+n_wbv_scatter <- ggplot(dementia, aes(x=cdr, y=n_wbv)) + 
+  geom_point() +
+  theme_itm() +
+  geom_smooth(method=lm,  linetype="dashed",
+             color="#CC79A7", fill="#999999") +
+  ylab("Normalized whole-brain volume (nWBV) [%]") + 
+    theme(axis.title.y = element_text(angle = 90)) +
+  stat_cor(method="spearman", cor.coef.name = "rho", label.x = 1.5,
+                  label.y = 1,  size = 3)
+
+asf_scatter <- ggplot(dementia, aes(x=cdr, y=asf)) + 
+  geom_point() +
+  theme_itm() +
+  geom_smooth(method=lm,  linetype="dashed",
+             color="#E69F00", fill="#56B4E9") +
+  ylab("Atlas Scaling Factor (ASF) [unitless]") + 
+    theme(axis.title.y = element_text(angle = 90)) +
+  stat_cor(method="spearman", cor.coef.name = "rho", label.x = 1.5,
+                  label.y = 0.5,  size = 3)
+
+educ_scatter <- ggplot(dementia, aes(x=cdr, y=educ)) + 
+  geom_point() +
+  theme_itm() +
+  geom_smooth(method=lm,  linetype="dashed",
+             color="#0072B2", fill="#D55E00") +
+  ylab("Years in Education (EDUC)") + 
+    theme(axis.title.y = element_text(angle = 90)) +
+  stat_cor(method="spearman", cor.coef.name = "rho", label.x = 1.5,
+                  label.y = 1,  size = 3)
+
+ses_scatter <- ggplot(dementia, aes(x=cdr, y=ses)) + 
+  geom_point() +
+  theme_itm() +
+  geom_smooth(method=lm,  linetype="dashed",
+             color="#CC79A7", fill="#999999")  +
+  ylab("Socioeconomic Status (SES)") + 
+    theme(axis.title.y = element_text(angle = 90)) +
+  stat_cor(method="spearman", cor.coef.name = "rho", label.x = 1.5,
+                  label.y = 1,  size = 3)
+
+scatter_figure <- paste(" Figure 3.1: Scatter Plots That Demonstrate Correlations Between Determinant And A High CDR: X axis is always clinical dementia rating (CDR). A CDR of 0.0 inidicates no dementia while 2.0 is considered moderate, for a futher expnantion see figure 2.1. Y axis values are the determinants, each is explained in figure 2.1. The rho value and p values on each plot are generated from a Spearmans Correlation Test. A rho value between -1 & 0 indicates negative correlation while a value between 0 & 1 indicates a postive correlation. The P value indictaes whether the correlation is signficant. Dashed line is a line of best fit generated through linear modelling, line shadow is standard error. Colour has no signficance other than to help with differentiating. Dots indicate data points. MMSE (p-value < 2.2e-16, rho = -0.6646596), nWBV (p-value = 2.072e-12, rho = -0.3621395) and years in education (p-value = 0.00119, -0.1715962) all negatively correlated with CDR. Age (p-value = 0.4376, rho = -0.04138466), eTIV (p-value = 0.3645, rho = 0.04833987) and ASF (p-value = 0.3629, rho = -0.04849712) saw no correlation with a higher CDR. A lower Socioeconmic status (a higher score indicates lower status) postively correlated with a higher CDR (p-value = 0.04397, rho = 0.107132).",
+              sep = " ")
+text_p <- ggparagraph(text = scatter_figure, size = 12) +
+  theme(plot.background = element_rect(colour = "black"), 
+        plot.margin = unit(c(0.3,0.3,0.3,0.3), "cm"))
+arrange1 <- ggarrange(age_scatter, mmse_scatter, e_tiv_scatter,
+                ncol = 3, nrow = 1)
+arrange2 <- ggarrange(n_wbv_scatter, asf_scatter, educ_scatter, 
+                ncol = 3, nrow = 1)
+arrange3 <- ggarrange(ses_scatter, text_p, 
+                ncol = 2, nrow =1, widths = c(0.33333, 0.66666))
+arrange4 <- ggarrange(arrange1, arrange2, arrange3, ncol = 1, nrow = 3)
+arrange4
+```
+
+## Summary Table
+Table generated using the **`kableExtra`** package [@kableextra].
+```{r dementia-summary-statistics}
 # creating determinant value to add as a column
 determinant <- "determinant"
 
 # list of column names for summary table column headers
-summarycolumnnames <- c("Determinant", "CDR", "Mean", "N", "Standard Deviation", "Standard Error")
+summarycolumnnames <- c("Determinant", "CDR", "Mean", "N", "Standard Deviation", "Standard Error", "Minimum", "Maximum")
 
-# create a summary table, add a determinant column, unless that already exists 
-# (fncols function) and add in the determinant name to the column, removing NA as
-# well (paste2 function).
+# create a summary table using the data_summary function
+# add a determinant column, unless that already exists using fnconcol function
+# paste in the determinant name to the new determinant column
+# remove the leftover NA from the determinant columns
 
 # Age Summary Table
 age_summary <- data_summary(dementia, age, cdr) %>% 
-  fncols(determinant) 
-age_summary$determinant <- paste_no_na("Age", age_summary$determinant)
+  fnconcol(determinant) 
+age_summary$determinant <- paste("Age", age_summary$determinant)
+age_summary$determinant <- str_replace_all(age_summary$determinant, "NA", "")
+
+#MMSE Summary Table
+mmse_summary <- data_summary(dementia, mmse, cdr) %>% 
+  fnconcol(determinant) 
+mmse_summary$determinant <- paste("MMSE", mmse_summary$determinant)
+mmse_summary$determinant <- str_replace_all(mmse_summary$determinant, "NA", "")
 
 # eTIV Summary Table
 e_tiv_summary <- data_summary(dementia, e_tiv, cdr) %>% 
-  fncols(determinant) 
-e_tiv_summary$determinant <- paste_no_na("eTIV", e_tiv_summary$determinant)
+  fnconcol(determinant) 
+e_tiv_summary$determinant <- paste("eTIV", e_tiv_summary$determinant)
+e_tiv_summary$determinant <- str_replace_all(e_tiv_summary$determinant, "NA", "")
 
 # nWBV Summary Table
 n_wbv_summary <- data_summary(dementia, n_wbv, cdr) %>% 
-  fncols(determinant)
-n_wbv_summary$determinant <- paste_no_na("nWBV", n_wbv_summary$determinant)
+  fnconcol(determinant)
+n_wbv_summary$determinant <- paste("nWBV", n_wbv_summary$determinant)
+n_wbv_summary$determinant <- str_replace_all(n_wbv_summary$determinant, "NA", "")
 
 # ASF Summary Table
 asf_summary <- data_summary(dementia, asf, cdr) %>% 
-  fncols(determinant)
-asf_summary$determinant <- paste_no_na("ASF", asf_summary$determinant)
+  fnconcol(determinant)
+asf_summary$determinant <- paste("ASF", asf_summary$determinant)
+asf_summary$determinant <- str_replace_all(asf_summary$determinant, "NA", "")
 
 # EDUC Summary Table
 educ_summary <- data_summary(dementia, educ, cdr) %>% 
-  fncols(determinant)
-educ_summary$determinant <- paste_no_na("EDUC", educ_summary$determinant)
+  fnconcol(determinant)
+educ_summary$determinant <- paste("EDUC", educ_summary$determinant)
+educ_summary$determinant <- str_replace_all(educ_summary$determinant, "NA", "")
 
 # SES Summary Table
 ses_summary <- data_summary(dementia, ses, cdr) %>% 
-  fncols(determinant)
-ses_summary$determinant <- paste_no_na("SES", ses_summary$determinant)
+  fnconcol(determinant)
+ses_summary$determinant <- paste("SES", ses_summary$determinant)
+ses_summary$determinant <- str_replace_all(ses_summary$determinant, "NA", "")
+```
 
+```{r dementia-summary-statistics-table}
 # Combining all summary tables into one
-summary_table <- rbind(age_summary, e_tiv_summary, n_wbv_summary, asf_summary,
-                       educ_summary, ses_summary)
+summary_table <- rbind(age_summary, mmse_summary, e_tiv_summary, n_wbv_summary, 
+                       asf_summary, educ_summary, ses_summary)
 
 #reorder by column index so determinant is first
-summary_table <- summary_table[c(6,1,2,3,4,5)]
+summary_table <- summary_table[c(8,1,2,3,4,5,6,7)]
 
 # generating summary table, row colours are colour blind friendly and are meant to
 # help differ different determinants
 kbl(summary_table, caption = "Summary Statitics Table", col.names = summarycolumnnames) %>%
-  kable_styling(bootstrap_options = "condensed", full_width = F, position = "float_right") %>% 
-  row_spec(c(1,2,3), color = "white",
-           background = "#E69F00") %>% 
-  row_spec(c(4,5,6), color = "white",
-           background = "#56B4E9") %>% 
-  row_spec(c(7,8,9), color = "white",
-           background = "#009E73") %>% 
-  row_spec(c(10,11,12), color = "white",
-           background = "#CC79A7")  %>% 
-  row_spec(c(13,14,15), color = "white",
-           background = "#0072B2")  %>% 
-  row_spec(c(16,17,18), color = "white",
-           background = "#D55E00") 
+  kable_styling(bootstrap_options = "condensed", full_width = T, font_size = "10") %>%
+  kable_material_dark()
+```
+# Influence of Individual Determinants Over A Time Period Of 2 Years {.tabset}
 
-# Summary Table for Sex (m_f) (frequency data)
+```{r dementia2-exploration-visulisation,, include=FALSE}
+# First ten rows of dementia
+head(dementia2, n = 10)
+# Dimensions of dementia
+dim(dementia2)
+# Class of dementia
+class(dementia2)
+# Structure of dementia
+str(dementia2)
 ```
 
-```{r extract}
-
+```{r dementia2-distrubution, include=FALSE}
+# is the data normally distributed?
+# (doing a longer method than as for dementia as not all columns are numeric)
+shapiro.test(dementia2$age)
+shapiro.test(dementia2$mmse)
+shapiro.test(dementia2$e_tiv)
+shapiro.test(dementia2$n_wbv)
+shapiro.test(dementia2$asf)
+shapiro.test(dementia2$educ)
+shapiro.test(dementia2$ses)
+# Normally distributed:
+# age, e_tiv,,n_wbv, asf
+# Not normally distributed
+# mmse, educ, ses
 ```
 
-```{r testing}
-
+```{r dementia2-testing-paired-t-test, include=FALSE}
+# paired t tests for the normally distrbuted columns
+age_t_test <- t.test(age ~ visit, data = dementia2, paired = TRUE)
+e_tiv_t_test <- t.test(e_tiv ~ visit, data = dementia2, paired = TRUE)
+n_wbv_t_test <- t.test(n_wbv ~ visit, data = dementia2, paired = TRUE)
+asf_t_test <- t.test(asf ~ visit, data = dementia2, paired = TRUE)
+age_t_test
+e_tiv_t_test
+n_wbv_t_test
+asf_t_test
 ```
 
-```{r posthoc}
-
+```{r dementia2-testing-wilcoxon, include=FALSE}
+mmse_wilcox <- wilcox.test(mmse ~ visit, data = dementia2, paired = TRUE, alternative = "two.sided")
+educ_wilcox <- wilcox.test(educ ~ visit, data = dementia2, paired = TRUE, alternative = "two.sided")
+ses_wilcox <- wilcox.test(ses ~ visit, data = dementia2, paired = TRUE, alternative = "two.sided")
+mmse_wilcox
+educ_wilcox
+ses_wilcox
 ```
 
+## Box Plots
+Plots are generated using **`ggplot2`** from the **`tidyverse`** package [@tidyverse]. Arrangement of plots into a grid was achieved using ggarrange from the **`ggpubr`** package [@ggpubr].
+```{r dementia2-paired-plots, fig.height = 12, fig.width = 14, out.width="1200px", out.height="750px", fig.cap="\\label{fig:fig2}Boxplots Showing Deterimant Data At The Start And End Of The Study In Converted Patients."}
+palette <- c("#E69F00", "#56B4E9", "#009E73", 
+                       "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999")
 
-# Clinical Dementia Rating Prediction Model
+age_paired <- ggplot(dementia2, aes(x = visit, y = age, color = visit)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_line(aes(group = age), colour = "#E69F00") +
+  geom_point() +
+  theme_itm() +
+  ylab("Age (years)") + 
+  xlab("Visit") +
+  theme(axis.title.y = element_text(angle = 90)) +
+  scale_colour_manual(values=c("#009E73", "#56B4E9")) +
+  stat_compare_means(paired = TRUE, method = "t.test")
 
-```{r dementia-tidying-prediction}
-# removal of subject_id data (gives no information about patient)
-dementia_prediction <- subset(dementia, select =- subject_id) 
+mmse_paired <- ggplot(dementia2, aes(x = visit, y = mmse, color = visit)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_line(aes(group = mmse), colour = "#D55E00") +
+  geom_point() +
+  theme_itm() +
+  ylab("Mini-Mental State Examination score (MMSE)") + 
+  xlab("Visit") +
+  ylim(24,32) +
+  theme(axis.title.y = element_text(angle = 90)) +
+  scale_colour_manual(values=c("#0072B2", "#F0E442")) +
+  stat_compare_means(paired = TRUE)
 
-# converting categorical data (M or F) to numerical data (M = 2, F = 1) for use in model
-dementia_prediction[dementia_prediction == "F"] <- 1 
-dementia_prediction[dementia_prediction == "M"] <- 2
+e_tiv_paired <- ggplot(dementia2, aes(x = visit, y = e_tiv, color = visit)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_line(aes(group = e_tiv), colour = "#D55E00") +
+  geom_point() +
+  theme_itm() +
+  ylab("Estimated total intracranical volume (eTIV) [mm3]") + 
+  xlab("Visit") +
+  theme(axis.title.y = element_text(angle = 90)) +
+  scale_colour_manual(values=c("#CC79A7", "#999999")) +
+  stat_compare_means(paired = TRUE, method = "t.test")
 
-dementia_prediction$m_f <- as.numeric(dementia_prediction$m_f)
+n_wbv_paired <- ggplot(dementia2, aes(x = visit, y = n_wbv, color = visit)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_line(aes(group = n_wbv), colour = "#E69F00") +
+  geom_point() +
+  theme_itm() +
+  ylab("Normalized whole-brain volume (nWBV) [%]") + 
+  xlab("Visit") +
+  ylim(0.65,0.85) +
+  theme(axis.title.y = element_text(angle = 90)) +
+  scale_colour_manual(values=c("#009E73", "#56B4E9")) +
+  stat_compare_means(paired = TRUE, method = "t.test")
+
+asf_paired <- ggplot(dementia2, aes(x = visit, y = asf, color = visit)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_line(aes(group = asf), colour = "#D55E00") +
+  geom_point() +
+  theme_itm() +
+  ylab("Atlas Scaling Factor (ASF) [unitless]") + 
+  xlab("Visit") +
+  ylim(1,1.45) +
+  theme(axis.title.y = element_text(angle = 90)) +
+  scale_colour_manual(values=c("#0072B2", "#F0E442")) +
+  stat_compare_means(paired = TRUE, method = "t.test")
+
+educ_paired <- ggplot(dementia2, aes(x = visit, y = educ, color = visit)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_line(aes(group = educ), colour = "#D55E00") +
+  geom_point() +
+  theme_itm() +
+  ylab("Years in Education") + 
+  xlab("Visit") +
+  ylim(12,21) +
+  theme(axis.title.y = element_text(angle = 90)) +
+  scale_colour_manual(values=c("#CC79A7", "#999999")) +
+  stat_compare_means(paired = TRUE)
+
+ses_paired <- ggplot(dementia2, aes(x = visit, y = ses, color = visit)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_line(aes(group = ses), colour = "#E69F00") +
+  geom_point() +
+  theme_itm() +
+  ylab("Socioeconomic Status (SES)") + 
+  xlab("Visit") +
+  ylim(1,4.1) +
+  theme(axis.title.y = element_text(angle = 90)) +
+  scale_colour_manual(values=c("#009E73", "#56B4E9")) +
+  stat_compare_means(paired = TRUE)
+
+paired_figure <- paste("Figure 4.1: Boxplots Showing Determinant Data At The Start And End Of The Study In Converted Patients: All patients in this group were diagnosed with dementia over the course of the study. The start box represents data recorded for visit 1, end box shows data taken atleast a year later for visit 2. Pair lines show data that did not change over the time period. Boxplots show data median and interquantile range. Points are individual data points. P value is generated from either a paired t test or a paired samples Wilcoxon, depending on data normality. Education and socioeconomic status did not change, hence why all data has pair lines and no statistical test. Age had a p value of 2.016e-05, this was to be expected as everyone had a birthday over the course of the study. MMSE and ASF did not signficantly change over the time period with p values of 0.05783 and 0.052 respectively. eTIV did signfcantly change with a pvalue of 0.02756, as did nWBV which had a p value of 0.003125.",
+              sep = " ")
+text_p2 <- ggparagraph(text = paired_figure, size = 12) +
+  theme(plot.background = element_rect(colour = "black"), 
+        plot.margin = unit(c(0.3,0.3,0.3,0.3), "cm"))
+arrange5 <- ggarrange(age_paired, mmse_paired, e_tiv_paired,
+                ncol = 3, nrow = 1)
+arrange6 <- ggarrange(n_wbv_paired, asf_paired, educ_paired, 
+                ncol = 3, nrow = 1)
+arrange7 <- ggarrange(ses_paired, text_p2, 
+                ncol = 2, nrow =1, widths = c(0.33333, 0.66666))
+arrange8 <- ggarrange(arrange5, arrange6, arrange7, ncol = 1, nrow = 3)
+arrange8
 ```
 
-```{r dementia-partition}
-# randomly select rows for the training data set
-ids <- createDataPartition(y = dementia_prediction$cdr,
-                           p = 0.75,
-                           list = FALSE)
-# subset training (75% of data) and testing (25% of data) sets based on row selection
-train <- dementia_prediction %>% slice(ids)
-test <- dementia_prediction %>% slice(-ids)
-```
+## Summary Table
 
-```{r dementia-lda-train}
-lda <- train %>% 
-  select(-cdr) %>%
-  MASS::lda(grouping = train$cdr)
-```
-
-```{r dementia-lda-predict-on-test}
-plda <- test %>% 
-  select(-cdr) %>%
-  predict(object = lda)
-```
-
-```{r dementia-lda-confusion}
-confusionMatrix(plda$class, factor(test$cdr))
-```
-
-```{r model-accuracy}
-
-```
-
-# Clinical Dementia Rating Questionairre
-
-```{r shiny}
-
-```
+# Dementia Grouping Questionnaire
+In addition, a LDA model and a questionnaire whose responses are fed into the model can be found here:[dementia_grouping_questionnaire.Rmd](./dementia_grouping_questionnaire.Rmd). The unique packages used in this are as follows: **`caret`** [@caret], **`MASS`** [@mass] , **`shiny`** [@shiny] and **`shinyforms`** [@shinyforms]. Explanation of package use can be found in the linked Rmd file. The model is trained to predict dementia grouping (demented or nondemented).
 
 # Discussion
+Issues with data set:
+does not cover all factors e.g. family history
+no cases of 3.0 or over, only x 2.0s
+all right handed
+quite small
+Dementia 2: for stats test visit data was converted to having two levels instead of multiple. So this only identifies factors that increased it over time but does not specify how lomg this takes. more research could be done on this
+
+# Word Count
+Word count is calculated using wordcountaddin [@wordcountaddin].
+
+```{r wordcount}
+wc_main <- wordcountaddin::word_count("main.Rmd") %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+wc_questionnaire <- wordcountaddin::word_count("dementia_grouping_questionnaire.Rmd")%>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+wc_readme <- wordcountaddin::word_count("README.md")%>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+
+wc_total <- wc_main + wc_readme + wc_questionnaire
+```
+
+This rmd script: `r wc_main`\
+The dementia grouping questionnaire script: `r wc_questionnaire`\
+The README: `r wc_readme`\
+**Total: `r wc_main + wc_readme`**
 
 # References

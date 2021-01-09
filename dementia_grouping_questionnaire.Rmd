@@ -1,0 +1,201 @@
+---
+title: "Dementia Grouping Questionnaire"
+author: "Ellie Kewin"
+date: "Last compiled on 08/01/2021"
+output: 
+  bookdown::html_document2:
+    toc: true
+    number_sections: true
+    css: "style.css"
+bibliography: reference.bib
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      warning = FALSE,
+                      message = FALSE,
+                      fig.retina = 10)
+
+############### Please run shiny-questionnaire chunk before knitting #################
+```
+
+```{r packages}
+library(tidyverse)
+library(bookdown)
+library(caret)
+library(shiny)
+library(shinyforms)
+library(readxl)
+```
+# Introduction
+This smaller script has two components: a shiny questionnaire and a LDA model which predicts dementia grouping based on determinants. These are then combined when the responses to the shiny questionnaire are used by the model to predict dementia group. It is recommended that [main.Rmd](./main.Rmd) is looked at first. The model is not perfect, dementia is a complex disease. As such this tool is not meant for diagnosis.
+
+Work flow is produced with R, a statistical computing language, [@r-core-team] and R Markdown which generates this report.[@rmarkdown]. The **`bookdown`** package is used to add features to R Markdown such as cross referencing [@bookdown].
+
+# Data Import and Transformation: dementia_model: Used In Linear Discriminant Analysis (LDA)
+
+visit_data and patient_data are imported using R, the **`tidyverse`** [@tidyverse] and **`readxl`** [@readxl] packages.
+
+As with the data sets in [main.Rmd](./main.Rmd), dementia_model starts by merging visit_data and patient_data into one set by subject ID. Post import and merging, data variable names are cleaned with the **`janitor`** [@janitor] package. Subject_id, cdr, mri_number and visit columns are removed as these give no information that could be for the LDA. NA rows are also removed. The values in m_f have been converted to numerical values for the LDA (F = 1, M = 2). Anyone with a cdr of 0.0 was treated as nondemented while anything higher was treated as demented. This is to create a model that makes a binary choice between dementia or not.
+```{r import}
+# reading in both xlsx sheets from the dementia.xlsx file
+visit_data <- read_excel("data_raw/dementia.xlsx", sheet = 1)
+patient_data <-read_excel("data_raw/dementia.xlsx", sheet = 2)
+```
+
+```{r transformation-model-dataset}
+# creating a dataset that will be used in the LDA
+
+# key difference is swapping cdr for group. This is a simple model that tries to predict whether a person has dementia, not the severity.
+
+# merging data frames (by subject_id) and cleaning column names
+dementia_model <- merge.data.frame(visit_data, patient_data,
+  by = "Subject ID") %>% 
+  janitor::clean_names()
+
+# removing columns not used for LDA, rows with missing values and duplicate rows
+dementia_model <- subset(dementia_model, 
+                         select =- c(group, subject_id, mri_number, visit)) %>% 
+  drop_na() 
+
+# converting categorical data (F or M) to numerical data (F = 1, M = 2) for use in LDA
+dementia_model[dementia_model == "F"] <- 1 
+dementia_model[dementia_model == "M"] <- 2
+dementia_model$m_f <- as.numeric(dementia_model$m_f)
+
+# changing all converted with a cdr of 0.5 or above to demented
+# changing all converted with a cdr of 0.0 to non demented
+dementia_model <- dementia_model %>% mutate(cdr = replace(cdr, cdr == 0.0, "Nondemented"))
+dementia_model <- dementia_model %>% mutate(cdr = replace(cdr, cdr == 0.5, "Demented"))
+dementia_model <- dementia_model %>% mutate(cdr = replace(cdr, cdr == 1, "Demented"))
+dementia_model <- dementia_model %>% mutate(cdr = replace(cdr, cdr == 2, "Demented"))
+```
+
+# Shiny Questionaire
+This questionnaire requires both personal information and data from T1 weighted MRI scans. It is not a diagnostic tool, its use is for identifying at risk individuals. Questionnaire is generated using **`shiny`** [@shiny] and **`shinyforms`** [@shinyforms].
+```{r shiny-questionnaire, echo=FALSE}
+questions <- list(
+    list(id = "age", type = "numeric", title = "Age (Years)", mandatory = TRUE),
+    list(id = "mmse", type = "numeric", title = "Patient MMSE Score", mandatory = TRUE,
+         hint = "Type between 0 and 30"),
+    list(id = "e_tiv", type = "numeric", title = "Patient eTIV Result [mm3]", mandatory = TRUE,
+         hint = "for example: 1234"),
+    list(id = "n_wbv", type = "numeric", title = "Patient nWBV Result [%]", mandatory = TRUE,
+         hint = "For example: 0.678"),
+    list(id = "asf", type = "numeric", title = "Patient ASF Result", mandatory = TRUE,
+         hint = "For example: 1.234"),
+    list(id = "m_f", type = "numeric", title = "Patient Sex", mandatory = TRUE,
+         hint = "Type 1 For Female, 2 For Male"),
+    list(id = "educ", type = "numeric", title = "Patient Years Spent In Education", mandatory = TRUE),
+    list(id = "ses", type = "numeric", title = "Patient Hollingshead Four 
+         Factor Index Of Social Status", mandatory = TRUE,
+         hint = "Type between 1 and 5")
+    
+)
+
+formInfo <- list(
+    id = "basicinfo",
+    questions = questions,
+    storage = list(
+        type = STORAGE_TYPES$FLATFILE,
+        path = "responses"
+    ),
+    name = "Dementia Prediction Questionnaire",
+    multiple = FALSE,
+    validations = list(
+        list(condition = "input$m_f <= 2",
+             message = "Sex must be submitted as either 1 (female) or 2 (male)"),
+        list(condition = "input$mmse <= 30",
+             message = "MMSE scores range from 0 to 30"),
+        list(condition = "input$ses <= 5",
+             message = "Hollingshead four factor index of social status scores must
+             range from 1-5"))
+)
+
+ui <- fluidPage(
+    formUI(formInfo)
+)
+
+server <- function(input, output, session) {
+    formServer(formInfo)
+  
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+# Dementia Grouping Prediction Model
+Sub-setting of dementia_model into the testing and training data sets used in the LDA is realized with the **`caret`** package [@caret]. The **`MASS`** package [@mass] is used for the **`lda`** function.
+
+Understanding The Confusion Matrix:
+A confusion matrix is a way of evaluating model performance. Accuracy is total samples identified correctly. Mcnemar's Test P-Value is model significance based on 2x2 contingency table. Contingency table interpretation is shown in below:
+![Caption:Understanding The Confusion Matrix](./pictures/understanding_confusion_matrix.png){width=50%}
+
+[@Mohajon2020-px]
+```{r dementia-partition}
+# randomly select rows for the training data set
+ids <- createDataPartition(y = dementia_model$cdr,
+                           p = 0.75,
+                           list = FALSE)
+# subset training (75% of data) and testing (25% of data) sets based on row selection
+train <- dementia_model %>% slice(ids)
+test <- dementia_model %>% slice(-ids)
+```
+
+```{r dementia-lda-train}
+# training lda using train dataset
+lda <- train %>% 
+  select(-cdr) %>%
+  MASS::lda(grouping = train$cdr)
+```
+
+```{r dementia-lda-predict-on-test}
+# using lda from previous chunk to predict dementia group for test data set
+plda <- test %>% 
+  select(-cdr) %>%
+  predict(object = lda)
+```
+
+```{r dementia-lda-confusion, include=TRUE}
+# generating confusion matrix for plda
+confusionMatrix(plda$class, factor(test$cdr))
+```
+
+# LDA Using Questionnaire Responses
+```{r import-questionnaire-response}
+# importing questionnaire responses, without knowing name of file at the end of the path
+questionnaire_response <- list.files(path = "responses/",
+               pattern = "*.csv", 
+               full.names = T) %>% 
+    map_df(~read_csv(., col_types = cols(.default = "c")))
+```
+
+```{r tidy-questionnaire-reponse}
+# removing timestamp col
+questionnaire_response$timestamp <- NULL
+# adding a blank cdr col
+questionnaire_response$cdr <- NA
+# making col classes numeric
+questionnaire_response <- mutate_all(questionnaire_response, function(x)
+  as.numeric(as.character(x)))
+# making cdr col a character
+questionnaire_response$cdr <- as.character(questionnaire_response$cdr)
+```
+
+```{r questionairre-model}
+# generating LDA again
+lda.fit <- MASS::lda(cdr ~ ., data = train)
+# predicting responses dementia group using LDA 
+lda.pred <- predict(lda.fit, questionnaire_response)
+# printing 
+lda.pred
+```
+
+```{r delete-responses}
+# deleting the questionnaire responses, ready to be run again
+unlink("responses/*")
+```
+Note: responses are automatically deleted.
+
+# References
