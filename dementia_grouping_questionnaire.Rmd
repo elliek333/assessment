@@ -29,15 +29,13 @@ library(shinyforms)
 library(readxl)
 ```
 # Introduction
-This smaller script has two components: a shiny questionnaire and a LDA model which predicts dementia grouping based on determinants. These are then combined when the responses to the shiny questionnaire are used by the model to predict dementia group. It is recommended that [main.Rmd](./main.Rmd) is looked at first. The model is not perfect, dementia is a complex disease. As such this tool is not meant for diagnosis.
+This script has two components: a shiny questionnaire and a linear discriminant analysis (LDA) model which predicts dementia grouping. Components are combined when the questionnaire responses are used by the model to predict dementia group. It is recommended that [main.Rmd](./main.Rmd) is looked at first. The model is not perfect, this tool is not meant for diagnosis.
 
-Work flow is produced with R, a statistical computing language, [@r-core-team] and R Markdown which generates this report.[@rmarkdown]. The **`bookdown`** package is used to add features to R Markdown such as cross referencing [@bookdown].
+Work flow is produced with R [@r-core-team], R Markdown.[@rmarkdown] and the **`bookdown`** package [@bookdown].
 
-# Data Import and Transformation: dementia_model: Used In Linear Discriminant Analysis (LDA)
+# Data Import and Transformation: dementia_model
 
-visit_data and patient_data are imported using R, the **`tidyverse`** [@tidyverse] and **`readxl`** [@readxl] packages.
-
-As with the data sets in [main.Rmd](./main.Rmd), dementia_model starts by merging visit_data and patient_data into one set by subject ID. Post import and merging, data variable names are cleaned with the **`janitor`** [@janitor] package. Subject_id, cdr, mri_number and visit columns are removed as these give no information that could be for the LDA. NA rows are also removed. The values in m_f have been converted to numerical values for the LDA (F = 1, M = 2). Anyone with a cdr of 0.0 was treated as nondemented while anything higher was treated as demented. This is to create a model that makes a binary choice between dementia or not.
+visit_data and patient_data are imported using R, the **`tidyverse`** [@tidyverse] and **`readxl`** [@readxl] packages. dementia_model starts by merging visit_data and patient_data into one set by subject ID. Column names are cleaned with the **`janitor`** [@janitor] package. Subject_id, cdr, mri_number and visit columns are removed. NA rows are also removed. The values in m_f have been converted to numerical values for the LDA (F = 1, M = 2). Anyone with a cdr of 0.0 was treated as nondemented while anything higher was treated as demented. This is to create a model that makes a binary choice.
 ```{r import}
 # reading in both xlsx sheets from the dementia.xlsx file
 visit_data <- read_excel("data_raw/dementia.xlsx", sheet = 1)
@@ -73,7 +71,7 @@ dementia_model <- dementia_model %>% mutate(cdr = replace(cdr, cdr == 2, "Dement
 ```
 
 # Shiny Questionaire
-This questionnaire requires both personal information and data from T1 weighted MRI scans. It is not a diagnostic tool, its use is for identifying at risk individuals. Questionnaire is generated using **`shiny`** [@shiny] and **`shinyforms`** [@shinyforms].
+This questionnaire requires both personal information and data from T1 weighted MRI scans. Questionnaire is produced using the **`shiny`** [@shiny] and **`shinyforms`** [@shinyforms] packages.
 ```{r shiny-questionnaire, echo=FALSE}
 questions <- list(
     list(id = "age", type = "numeric", title = "Age (Years)", mandatory = TRUE),
@@ -126,9 +124,9 @@ shinyApp(ui = ui, server = server)
 ```
 
 # Dementia Grouping Prediction Model
-Sub-setting of dementia_model into the testing and training data sets used in the LDA is realized with the **`caret`** package [@caret]. The **`MASS`** package [@mass] is used for the **`lda`** function.
+Sub-setting of dementia_model into testing and training data sets used in the LDA is realized with the **`caret`** package [@caret]. The **`MASS`** package [@mass] is used its **`lda`** function.
 
-Understanding The Confusion Matrix:
+## Understanding The Confusion Matrix:
 A confusion matrix is a way of evaluating model performance. Accuracy is total samples identified correctly. Mcnemar's Test P-Value is model significance based on 2x2 contingency table. Contingency table interpretation is shown in below:
 ![Caption:Understanding The Confusion Matrix](./pictures/understanding_confusion_matrix.png){width=50%}
 

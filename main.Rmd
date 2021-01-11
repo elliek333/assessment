@@ -18,18 +18,16 @@ knitr::opts_chunk$set(echo = FALSE,
 ```
 
 ```{r packages}
-library(devtools)
-library(tidyverse)
-library(bookdown)
-library(caret)
-library(kableExtra)
-library(readxl)
-library(ggpubr)
-library(shiny)
-library(shinyforms)
+library(devtools) #installing addins
+library(tidyverse) # data tidying
+library(bookdown) # cross referencing and report 
+library(kableExtra) # generating tables
+library(readxl) # reading in excel sheets
+library(ggpubr) # for ggarange function
 ```
 
 ```{r addins}
+# installing word count addin
 devtools::install_github("benmarwick/wordcountaddin",  type = "source", dependencies = TRUE)
 ```
 
@@ -55,11 +53,11 @@ palette <- c("#E69F00", "#56B4E9", "#009E73",
 ```
 
 # Introduction
-Determining individuals most susceptible to a disease allows productive resource allocation. For diseases such as Dementia, individuals both inherit risk factors and accrue them throughout life. No factor is causative on its own, but understanding what contributes to a high risk allows the public health sector to assess and prevent potential health crises. Dementia is a clinical syndrome characterized by difficulties in memory and language, psychological and psychiatric changes, and impairments in activities of daily life [@Burns2009-sn]. Dementia's complex list of possible symptoms are reflected in its causes. Common origins of dementia can be degenerative neurological diseases such as Parkinson's or Alzheimer's; however vascular disorders in the brain, traumatic head injuries and some infections can lead to a dementia diagnosis.  
+Determining individuals most susceptible to a disease allows productive resource allocation. For diseases such as Dementia, individuals both inherit risk factors and accrue them throughout life. No factor is causative on its own, but understanding what contributes to a high risk allows the public health sector to assess and prevent potential health crises at a population level [@Baumgart2015-pc]. Dementia is a clinical syndrome characterized by difficulties in memory and language, psychological and psychiatric changes, and impairments in activities of daily life [@Burns2009-sn]. Dementia's complex list of possible symptoms are reflected in its causes. Common origins of dementia can be degenerative neurological diseases such as Parkinson's or Alzheimer's; however vascular disorders in the brain, traumatic head injuries and some infections can lead to a dementia diagnosis.  
 
-The data used in analysis is attained from a longitudinal study of 150 participants. Participants were right-handed, either male of female and aged between 60 and 96. They were characterized as either nondemented, demented or converted (became demented throughout the course of the study). For each session, participants took part in T1 weighted MRI scans, the results of which are recorded in the data set. Participants underwent 2 or more sessions, each separated by at least a year. 
+The data used in analysis is attained from a longitudinal study of 150 participants. Participants were right-handed, either male of female and aged between 60 and 96. They were characterized as either nondemented, demented or converted (became demented throughout the course of the study). For each session, participants took part in T1 weighted MRI scans, the results of which are recorded in visit_data. Participants underwent 2 or more sessions, each separated by at least a year. 
 
-This workflow aims to look at two questions. What factors are associated with an increased risk of dementia and what factors are associated with an increased risk over time. It is important to note, no determinant causes dementia. The profiles of two people characterized as suffering with dementia maybe completely different. 
+This workflow aims to look at two questions. What factors are associated with an increased risk of dementia and what factors are associated with an increased risk over time. It is important to note, no one determinant causes dementia. The profiles of two people characterized as suffering with dementia maybe completely different. 
  
 # Methods
 Workflow is produced with R, a statistical computing language, [@r-core-team] and R Markdown which generates this html report.[@rmarkdown]. The **`bookdown`** package is used to add features to R Markdown such as cross referencing [@bookdown].
@@ -73,10 +71,12 @@ patient_data <-read_excel("data_raw/dementia.xlsx", sheet = 2)
 ```
 
 ## Data Description
-Raw data is two excel sheets within the same spreadsheet [dementia.xlsx](./data_raw/dementia.xlsx). One sheet is visit data, containing information regarding amount of visits and MRIs as well as numerical results. The second sheet, patient data, contains information on current dementia status, sex, and education and social status. Each row is one patient's data at one given time. Replicate subject_IDs can be seen as some patients had data collected once a year over a course of multiple years. Explanations of each column can be seen in \@ref(tab:definitions-table).
+Raw data is two excel sheets within the same spreadsheet [dementia.xlsx](./data_raw/dementia.xlsx). The first sheet, visit_data, contains information regarding visit numbers and MRI results. The second sheet, patient_data, has information on current dementia status, sex, and education and social status. Each row is one patient's data at one given time. Replicate subject_IDs can be seen as some patients had data collected once a year over a course of multiple years. Explanations of each column can be seen in \@ref(tab:definitions-table).
 
 ```{r definitions-table}
 # a table which summarizes the key terms from the dementia data set
+
+# creating a dataframe with table text
 definitions_table <- data.frame(
   Term = c("MMSE","CDR", "eTIV", "nWBV", "ASF", "M_F", "EDUC", "SES"),
   Definition = c(
@@ -91,6 +91,7 @@ definitions_table <- data.frame(
   )
 )
 
+# using kable to create the table
 kbl(definitions_table, caption = "Key Terms Table") %>%
   column_spec(1, bold = T, border_right = T) %>%
   column_spec(2, width = "100em", background = "#999999", color = "black") %>% 
@@ -98,7 +99,7 @@ kbl(definitions_table, caption = "Key Terms Table") %>%
 ```
 
 ## Data Transformation
-3 data sets were created with the raw data. Each one starts by merging visit_data and patient_data into one set by subject ID. Post import and merging, data variable names are cleaned with the **`janitor`** [@janitor] package. From here they differ as described below:
+3 data sets were created with the raw data. Each one starts by merging visit_data and patient_data into one by subject ID. Post import and merging, data variable names are cleaned with the **`janitor`** [@janitor] package. From here they differ as described below:
 
 1. Dementia: used to look at which factors are associated with an increased risk of dementia. Columns not used in analysis (subject_id, visit, group and mri_number) and rows with NA values are removed. Finally, the values in m_f have been converted to numerical values for analysis (F = 1, M = 2).
 
@@ -171,32 +172,6 @@ dementia_extract <- merge.data.frame(visit_data, patient_data,
   distinct(subject_id, .keep_all = TRUE)
 ```
 
-```{r extract}
-# number of female participants
-nfemale <- sum(dementia_extract$m_f == "F") %>%
-  str_extract("[0-9]+") %>% 
-  as.numeric() 
-
-# number of male participants
-nmale <- sum(dementia_extract$m_f == "M")  %>%
-  str_extract("[0-9]+") %>% 
-  as.numeric()
-
-# number of particpants with a cdr of 2.0
-n2cdr <- sum(dementia$cdr == 2.0)  %>%
-  str_extract("[0-9]+") %>% 
-  as.numeric()
-
-# number of particpants with a cdr of less than 2.0
-n01cdr <- sum(dementia$cdr != 2.0)  %>%
-  str_extract("[0-9]+") %>% 
-  as.numeric()
-
-# number of converted particpiants
-nconverted <- sum(dementia2$group == "Converted")  %>%
-  str_extract("[0-9]+") %>% 
-  as.numeric()
-```
 # Which determinants correlate with increased CDR? {.tabset}
 Using the dementia data set, this section looks at which determinants correlate with a high clinical dementia rating (CDR). In other words which determinants are linked with dementia. A list and explanation of the determinants used in this analysis can be seen in \@ref(tab:definitions-table).
 
@@ -218,6 +193,7 @@ apply(dementia, 2, shapiro.test)
 ```
 
 ```{r dementia-testing-spearmans, include=FALSE}
+# conducting Spearman rank correlation coefficient to see if there is a correlation between determinants and a higher cdr. spearmans as none were normally distrubuted.
 age_spearman <-cor.test(dementia$age, dementia$cdr,  method = "spearman")
 mmse_spearman <-cor.test(dementia$mmse, dementia$cdr,  method = "spearman")
 e_tiv_spearman <-cor.test(dementia$e_tiv, dementia$cdr,  method = "spearman")
@@ -239,6 +215,8 @@ ses_spearman
 ## Scatter Plots
 Plots are generated using **`ggplot2`** from the **`tidyverse`** package [@tidyverse]. Arrangement of plots into a grid was achieved using ggarrange from the **`ggpubr`** package [@ggpubr].
 ```{r dementia-plot, fig.height = 12, fig.width = 14, out.width="1200px", out.height="750px", fig.cap="\\label{fig:figs}Scatter Plots That Demonstrate Correlations Between Determinant And A High CDR"}
+
+# Creating scatter plots using ggplot and custom theme_itm. Each plot has line of best fit and spearmans rho and p value. Each determinant has an individual plot.
 age_scatter <- ggplot(dementia, aes(x=cdr, y=age)) + 
   geom_point() +
   theme_itm() +
@@ -309,11 +287,15 @@ ses_scatter <- ggplot(dementia, aes(x=cdr, y=ses)) +
   stat_cor(method="spearman", cor.coef.name = "rho", label.x = 1.5,
                   label.y = 1,  size = 3)
 
+# Creating figure text
 scatter_figure <- paste(" Figure 3.1: Scatter Plots That Demonstrate Correlations Between Determinant And A High CDR: X axis is always clinical dementia rating (CDR). A CDR of 0.0 inidicates no dementia while 2.0 is considered moderate, for a futher expnantion see figure 2.1. Y axis values are the determinants, each is explained in figure 2.1. The rho value and p values on each plot are generated from a Spearmans Correlation Test. A rho value between -1 & 0 indicates negative correlation while a value between 0 & 1 indicates a postive correlation. The P value indictaes whether the correlation is signficant. Dashed line is a line of best fit generated through linear modelling, line shadow is standard error. Colour has no signficance other than to help with differentiating. Dots indicate data points. MMSE (p-value < 2.2e-16, rho = -0.6646596), nWBV (p-value = 2.072e-12, rho = -0.3621395) and years in education (p-value = 0.00119, -0.1715962) all negatively correlated with CDR. Age (p-value = 0.4376, rho = -0.04138466), eTIV (p-value = 0.3645, rho = 0.04833987) and ASF (p-value = 0.3629, rho = -0.04849712) saw no correlation with a higher CDR. A lower Socioeconmic status (a higher score indicates lower status) postively correlated with a higher CDR (p-value = 0.04397, rho = 0.107132).",
               sep = " ")
+# adding margin and changing font size of figure text
 text_p <- ggparagraph(text = scatter_figure, size = 12) +
   theme(plot.background = element_rect(colour = "black"), 
         plot.margin = unit(c(0.3,0.3,0.3,0.3), "cm"))
+
+# using ggarange to layout plots and text
 arrange1 <- ggarrange(age_scatter, mmse_scatter, e_tiv_scatter,
                 ncol = 3, nrow = 1)
 arrange2 <- ggarrange(n_wbv_scatter, asf_scatter, educ_scatter, 
@@ -329,9 +311,6 @@ Table generated using the **`kableExtra`** package [@kableextra].
 ```{r dementia-summary-statistics}
 # creating determinant value to add as a column
 determinant <- "determinant"
-
-# list of column names for summary table column headers
-summarycolumnnames <- c("Determinant", "CDR", "Mean", "N", "Standard Deviation", "Standard Error", "Minimum", "Maximum")
 
 # create a summary table using the data_summary function
 # add a determinant column, unless that already exists using fnconcol function
@@ -382,16 +361,19 @@ ses_summary$determinant <- str_replace_all(ses_summary$determinant, "NA", "")
 ```
 
 ```{r dementia-summary-statistics-table}
+# list of column names for summary table column headers
+dementia_summary_col_names <- c("Determinant", "CDR", "Mean", "N", "Standard Deviation", "Standard Error", "Minimum", "Maximum")
+
 # Combining all summary tables into one
-summary_table <- rbind(age_summary, mmse_summary, e_tiv_summary, n_wbv_summary, 
+dementia_summary_table <- rbind(age_summary, mmse_summary, e_tiv_summary, n_wbv_summary, 
                        asf_summary, educ_summary, ses_summary)
 
 #reorder by column index so determinant is first
-summary_table <- summary_table[c(8,1,2,3,4,5,6,7)]
+dementia_summary_table <- dementia_summary_table[c(8,1,2,3,4,5,6,7)]
 
 # generating summary table, row colours are colour blind friendly and are meant to
 # help differ different determinants
-kbl(summary_table, caption = "Summary Statitics Table", col.names = summarycolumnnames) %>%
+kbl(dementia_summary_table, caption = "Dementia Summary Statitics Table", col.names = dementia_summary_col_names) %>%
   kable_styling(bootstrap_options = "condensed", full_width = T, font_size = "10") %>%
   kable_material_dark()
 ```
@@ -437,6 +419,7 @@ asf_t_test
 ```
 
 ```{r dementia2-testing-wilcoxon, include=FALSE}
+# wilcoxon for non-normally distributed columns
 mmse_wilcox <- wilcox.test(mmse ~ visit, data = dementia2, paired = TRUE, alternative = "two.sided")
 educ_wilcox <- wilcox.test(educ ~ visit, data = dementia2, paired = TRUE, alternative = "two.sided")
 ses_wilcox <- wilcox.test(ses ~ visit, data = dementia2, paired = TRUE, alternative = "two.sided")
@@ -448,9 +431,8 @@ ses_wilcox
 ## Box Plots
 Plots are generated using **`ggplot2`** from the **`tidyverse`** package [@tidyverse]. Arrangement of plots into a grid was achieved using ggarrange from the **`ggpubr`** package [@ggpubr].
 ```{r dementia2-paired-plots, fig.height = 12, fig.width = 14, out.width="1200px", out.height="750px", fig.cap="\\label{fig:fig2}Boxplots Showing Deterimant Data At The Start And End Of The Study In Converted Patients."}
-palette <- c("#E69F00", "#56B4E9", "#009E73", 
-                       "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999")
 
+# creating paired plots for dementia2 data. Uses ggplot and theme_itm. Has stats test
 age_paired <- ggplot(dementia2, aes(x = visit, y = age, color = visit)) +
   geom_boxplot(outlier.shape = NA) +
   geom_line(aes(group = age), colour = "#E69F00") +
@@ -533,11 +515,16 @@ ses_paired <- ggplot(dementia2, aes(x = visit, y = ses, color = visit)) +
   scale_colour_manual(values=c("#009E73", "#56B4E9")) +
   stat_compare_means(paired = TRUE)
 
+# creating figure text
 paired_figure <- paste("Figure 4.1: Boxplots Showing Determinant Data At The Start And End Of The Study In Converted Patients: All patients in this group were diagnosed with dementia over the course of the study. The start box represents data recorded for visit 1, end box shows data taken atleast a year later for visit 2. Pair lines show data that did not change over the time period. Boxplots show data median and interquantile range. Points are individual data points. P value is generated from either a paired t test or a paired samples Wilcoxon, depending on data normality. Education and socioeconomic status did not change, hence why all data has pair lines and no statistical test. Age had a p value of 2.016e-05, this was to be expected as everyone had a birthday over the course of the study. MMSE and ASF did not signficantly change over the time period with p values of 0.05783 and 0.052 respectively. eTIV did signfcantly change with a pvalue of 0.02756, as did nWBV which had a p value of 0.003125.",
               sep = " ")
+
+# adding margin and changing font size of figure legend
 text_p2 <- ggparagraph(text = paired_figure, size = 12) +
   theme(plot.background = element_rect(colour = "black"), 
         plot.margin = unit(c(0.3,0.3,0.3,0.3), "cm"))
+
+# using ggarange to layout plot
 arrange5 <- ggarrange(age_paired, mmse_paired, e_tiv_paired,
                 ncol = 3, nrow = 1)
 arrange6 <- ggarrange(n_wbv_paired, asf_paired, educ_paired, 
@@ -550,21 +537,116 @@ arrange8
 
 ## Summary Table
 
+```{r dementia2-summary-statitics}
+# Age Summary Table
+age2_summary <- data_summary(dementia2, age, visit) %>% 
+  fnconcol(determinant) 
+age2_summary$determinant <- paste("Age", age2_summary$determinant)
+age2_summary$determinant <- str_replace_all(age2_summary$determinant, "NA", "")
+
+#MMSE Summary Table
+mmse2_summary <- data_summary(dementia2, mmse, visit) %>% 
+  fnconcol(determinant) 
+mmse2_summary$determinant <- paste("MMSE", mmse2_summary$determinant)
+mmse2_summary$determinant <- str_replace_all(mmse2_summary$determinant, "NA", "")
+
+# eTIV Summary Table
+e_tiv2_summary <- data_summary(dementia2, e_tiv, visit) %>% 
+  fnconcol(determinant) 
+e_tiv2_summary$determinant <- paste("eTIV", e_tiv2_summary$determinant)
+e_tiv2_summary$determinant <- str_replace_all(e_tiv2_summary$determinant, "NA", "")
+
+# nWBV Summary Table
+n_wbv2_summary <- data_summary(dementia2, n_wbv, visit) %>% 
+  fnconcol(determinant)
+n_wbv2_summary$determinant <- paste("nWBV", n_wbv2_summary$determinant)
+n_wbv2_summary$determinant <- str_replace_all(n_wbv2_summary$determinant, "NA", "")
+
+# ASF Summary Table
+asf2_summary <- data_summary(dementia2, asf, visit) %>% 
+  fnconcol(determinant)
+asf2_summary$determinant <- paste("ASF", asf2_summary$determinant)
+asf2_summary$determinant <- str_replace_all(asf2_summary$determinant, "NA", "")
+
+# EDUC Summary Table
+educ2_summary <- data_summary(dementia2, educ, visit) %>% 
+  fnconcol(determinant)
+educ2_summary$determinant <- paste("EDUC", educ2_summary$determinant)
+educ2_summary$determinant <- str_replace_all(educ2_summary$determinant, "NA", "")
+
+# SES Summary Table
+ses2_summary <- data_summary(dementia2, ses, visit) %>% 
+  fnconcol(determinant)
+ses2_summary$determinant <- paste("SES", ses2_summary$determinant)
+ses2_summary$determinant <- str_replace_all(ses2_summary$determinant, "NA", "")
+```
+
+```{r dementia2-summary-statistics-table}
+# list of column names for summary table column headers
+dementia2_summary_col_nnames <- c("Determinant", "Date", "Mean", "N", "Standard Deviation", "Standard Error", "Minimum", "Maximum")
+
+# Combining all summary tables into one
+dementia2_summary_table <- rbind(age2_summary, mmse2_summary, e_tiv2_summary, n_wbv2_summary, 
+                       asf2_summary, educ2_summary, ses2_summary)
+
+#reorder by column index so determinant is first
+dementia2_summary_table <- dementia2_summary_table[c(8,1,2,3,4,5,6,7)]
+
+# generating summary table, row colours are colour blind friendly and are meant to
+# help differ different determinants
+kbl(dementia2_summary_table, caption = "Dementia2 Summary Statitics Table", col.names = dementia2_summary_col_nnames) %>%
+  kable_styling(bootstrap_options = "condensed", full_width = T, font_size = "10") %>%
+  kable_material_dark()
+```
+
 # Dementia Grouping Questionnaire
-In addition, a LDA model and a questionnaire whose responses are fed into the model can be found here:[dementia_grouping_questionnaire.Rmd](./dementia_grouping_questionnaire.Rmd). The unique packages used in this are as follows: **`caret`** [@caret], **`MASS`** [@mass] , **`shiny`** [@shiny] and **`shinyforms`** [@shinyforms]. Explanation of package use can be found in the linked Rmd file. The model is trained to predict dementia grouping (demented or nondemented).
+In addition, a LDA model and a questionnaire whose responses are fed into the model can be found here: [dementia_grouping_questionnaire.Rmd](./dementia_grouping_questionnaire.Rmd). The unique packages used in this are as follows: **`caret`** [@caret], **`MASS`** [@mass] , **`shiny`** [@shiny] and **`shinyforms`** [@shinyforms]. Explanation of package use can be found in the linked Rmd file. The model is trained to predict dementia grouping (demented or nondemented).
 
 # Discussion
-Issues with data set:
-does not cover all factors e.g. family history
-no cases of 3.0 or over, only x 2.0s
-all right handed
-quite small
-Dementia 2: for stats test visit data was converted to having two levels instead of multiple. So this only identifies factors that increased it over time but does not specify how lomg this takes. more research could be done on this
+
+```{r extract}
+# number of female participants
+nfemale <- sum(dementia_extract$m_f == "F") %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric() 
+
+# number of male participants
+nmale <- sum(dementia_extract$m_f == "M")  %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+
+# number of particpants with a cdr of 2.0
+n2cdr <- sum(dementia$cdr == 2.0)  %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+
+# number of particpants with a cdr of less than 2.0
+n01cdr <- sum(dementia$cdr < 2.0)  %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+
+# number of particpants with a cdr of more than 2.0
+n34cdr <- sum(dementia$cdr > 2.0)  %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+
+# number of converted participants
+nconverted <- sum(dementia2$group == "Converted")  %>%
+  str_extract("[0-9]+") %>% 
+  as.numeric()
+
+# age p value from dementia analysis
+agepvalue <- age_spearman$p.value %>% 
+  round(digits = 2)
+```
+
+While this data set is insightful for a large range of medical and social determinants, it is in many ways limited. This is partly due to its longitudinal nature, data of this kind is time consuming to gather and getting willing participants is tricky. As a result, participants shared a common theme in this willingness, reducing generalizability to the whole population. All participants were right handed, there is conflicting evidence as to whether this increases [@Ryan2020-gw] or decreases [@De_Leon1986-ql] incidence of dementia onset (caused by Alzheimer's disease). Either way this also reduce generalizability. The data set included `r n2cdr` people with a CDR of 2.0, `r n34cdr` with a CDR of 3.0/4.0 and `r n01cdr` with a CDR of less than 2.0. Issues with consent may mean its harder to get participants with moderate to severe dementia. This led to some unexpected results, increased age was shown to not significantly increase CDR (p value = `r agepvalue`) but this contradicts studies which have shown age exponentially increases risk up to 90. [@Jorm1998-ks]. Table \@ref(tab:dementia-summary-statistics-table) shows a higher age in the CDR 2.0 bracket but the small sample size means this is not demonstrated by \@ref(fig:dementia-plot). Patient data could be expanded to include other determinants or to break down determinants used in this analysis. For example, it has been speculated age risk is due to associated factors such as higher blood pressure, changes to cell structure or the weakening of body repair systems. This workflow could be altered to include these by changing columns used where necessary (statistics, plots, summary tables, data tidying). Size affected dementia2 work due to the small converted sample size (`r nconverted`). To get around this visit data was converted to having two levels (start and end) rather than multiple (visit 1, 2 , 3 etc). So while it identifies determinants that led to an increase over time, it does not specify any time length, this is another area which could be looked at further with more data. Overall having a longitudinal study allowed temporal aspects of dementia onset to be considered but led to limited data collection. 
 
 # Word Count
 Word count is calculated using wordcountaddin [@wordcountaddin].
 
 ```{r wordcount}
+# using the word count addin to get word counts of main, readme and dementia grouping questionnaire
 wc_main <- wordcountaddin::word_count("main.Rmd") %>%
   str_extract("[0-9]+") %>% 
   as.numeric()
@@ -575,12 +657,13 @@ wc_readme <- wordcountaddin::word_count("README.md")%>%
   str_extract("[0-9]+") %>% 
   as.numeric()
 
+# adding them together for total wc
 wc_total <- wc_main + wc_readme + wc_questionnaire
 ```
 
 This rmd script: `r wc_main`\
 The dementia grouping questionnaire script: `r wc_questionnaire`\
 The README: `r wc_readme`\
-**Total: `r wc_main + wc_readme`**
+**Total: `r wc_main + wc_readme + wc_questionnaire`**
 
 # References

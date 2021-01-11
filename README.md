@@ -10,20 +10,21 @@ allow analysis of dementia determinants and linear
 discriminant analysis.
 
 ---------------------------------------------------
-Run Order
+RUN ORDER
 ---------------------------------------------------
 main.Rmd:
-1. Run all chunks or knit
+1. Knit
 
 dementia_grouping_questionnaire.Rmd:
-1. run shiny-questionnaire chunk and complete 
+1. run packages chunk
+2. run shiny-questionnaire chunk/complete 
 questionnaire
-2. knit, do not re do questionnaire
+3. knit
 ---------------------------------------------------
 PACKAGES AND ADDINS
 ---------------------------------------------------
-code can be copied into R and run to install the 
-necessary packages and addins:
+code can be copied into R and ran to install
+packages and addins:
 
 install.packages("devtools")
 devtools::install_github("benmarwick/wordcountaddin",
@@ -39,7 +40,6 @@ install.packages("shiny")
 ---------------------------------------------------
 VERSIONS
 ---------------------------------------------------
-The versions of softwares used to generate work flow
 
 R version 4.0.2
 RStudio Version 1.4.1010
@@ -52,9 +52,9 @@ Ggpubr Version 0.4.0
 Shiny Version 1.5.0
 
 ---------------------------------------------------
-Compatibility/Troubleshooting
+COMPATIBILITY/TROUBLESHOOTING
 ---------------------------------------------------
-Work flow is not compatible with the plyr package
+Work flow not compatible with the plyr package
 Word count addin not compatible for R Version 4.0.3
 Error in dementia_grouping_questionnaire.Rmd: object
 'age' not found: there is no file in the responses
@@ -63,11 +63,8 @@ folder, complete the questionnaire.
 SET UP:
 ---------------------------------------------------
 excel file containing visit data and patient data
-sheets should be deposited in the raw_data file. 
-visit data columns: Subject ID, MRI Number, Visit,
-Age, MMSE, CDR, eTIV, nWBV, ASF
-patient data columns: Subject ID, Group, M/F, EDUC
-SES
+sheets should be deposited in the data_raw file. 
+
 ---------------------------------------------------
 PROCESSING:
 ---------------------------------------------------
@@ -77,13 +74,9 @@ in the code chunks can be altered to work with new
 data. 
 
 If data set has different columns user will need to 
-specify these in the following code chunks:
+specify these in statistical analysis, plots, summary 
+tables and data tidying.
 
-Independent group columns (could be replaced with
-differing experimental conditions): Age, MMSE, CDR,
-eTIV, nWBV, ASF, M/F, EDUC, SES, Visit, Group
 
-Dependent group columns: CDR
-
-Please note some columns may need to be removed as well,
-some analysis requires only numeric classed columns.
+Please note some columns may need to be removed,
+some analysis requires numeric classed columns.
